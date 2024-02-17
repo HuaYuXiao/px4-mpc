@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 ############################################################################
 #
 #   Copyright (C) 2023 PX4 Development Team. All rights reserved.
@@ -31,54 +33,22 @@
 #
 ############################################################################
 
-from visualization import plot_multirotor
+import numpy as np
+from px4_mpc.visualization import plot_multirotor
 from px4_mpc.controllers.multirotor_rate_mpc import MultirotorRateMPC
 from px4_mpc.models.multirotor_rate_model import MultirotorRateModel
-import numpy as np
 
-def main(use_RTI=False):
+def main():
+
     model = MultirotorRateModel()
 
     mpc_controller = MultirotorRateMPC(model)
 
-    x0 = mpc_controller.x0
-    Tf = mpc_controller.Tf
-    N_horizon = mpc_controller.N
-    Fmax = model.max_thrust
-    wmax = model.max_rate
+    x0 = np.array([0.01, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0])
+    simU, simX = mpc_controller.solve(x0)
 
-    ocp_solver = mpc_controller.ocp_solver
-    integrator = mpc_controller.integrator
-
-    nx = ocp_solver.acados_ocp.dims.nx
-    nu = ocp_solver.acados_ocp.dims.nu
-
-    Nsim = 100
-    simX = np.ndarray((Nsim+1, nx))
-    simU = np.ndarray((Nsim, nu))
-
-    simX[0,:] = x0
-
-    t_feedback = np.zeros((Nsim))
-
-    # closed loop
-    for i in range(Nsim):
-        input, _ = mpc_controller.solve(simX[i, :])
-        simU[i,:] = input[0, :]
-        t_feedback[i] = mpc_controller.ocp_solver.get_stats('time_tot')
-        # simulate system
-        simX[i+1, :] = integrator.simulate(x=simX[i, :], u=simU[i,:])
-
-    # # evaluate timings
-    t_feedback *= 1000
-    print(f'Computation time in feedback phase in ms:    \
-            min {np.min(t_feedback):.3f} median {np.median(t_feedback):.3f} max {np.max(t_feedback):.3f}')
-
-    # plot results
-    plot_multirotor(model, np.linspace(0, (Tf/N_horizon)*Nsim, Nsim+1), simU, simX)
-
-    ocp_solver = None
+    plot_multirotor(model, np.linspace(0, mpc_controller.Tf, mpc_controller.N+1), simU, simX, latexify=False)
 
 
 if __name__ == '__main__':
-    main(use_RTI=True)
+    main()
