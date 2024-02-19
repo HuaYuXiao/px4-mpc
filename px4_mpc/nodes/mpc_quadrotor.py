@@ -39,28 +39,27 @@ from px4_mpc.controllers.multirotor_rate_mpc import MultirotorRateMPC
 __author__ = "Jaeyoung Lim"
 __contact__ = "jalim@ethz.ch"
 
-import rclpy
+import rospy
 import numpy as np
-from rclpy.node import Node
-from rclpy.clock import Clock
-from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy, QoSDurabilityPolicy
 
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped
 from visualization_msgs.msg import Marker
 
-from px4_msgs.msg import OffboardControlMode
-from px4_msgs.msg import VehicleStatus
-from px4_msgs.msg import VehicleAttitude
-from px4_msgs.msg import VehicleLocalPosition
-from px4_msgs.msg import VehicleRatesSetpoint
+from mavros_msgs.msg import State
+from mavros_msgs.msg import AttitudeTarget
+from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import TwistStamped
+from nav_msgs.msg import Path
+from visualization_msgs.msg import Marker
 
-from mpc_msgs.srv import SetPose
+# from mpc_msgs.srv import SetPose
+
 
 def vector2PoseMsg(frame_id, position, attitude):
     pose_msg = PoseStamped()
     # msg.header.stamp = Clock().now().nanoseconds / 1000
-    pose_msg.header.frame_id=frame_id
+    pose_msg.header.frame_id = frame_id
     pose_msg.pose.orientation.w = attitude[0]
     pose_msg.pose.orientation.x = attitude[1]
     pose_msg.pose.orientation.y = attitude[2]
@@ -70,46 +69,46 @@ def vector2PoseMsg(frame_id, position, attitude):
     pose_msg.pose.position.z = float(position[2])
     return pose_msg
 
-class QuadrotorMPC(Node):
 
+class QuadrotorMPC:
     def __init__(self):
-        super().__init__('minimal_publisher')
-        qos_profile = QoSProfile(
-            reliability=QoSReliabilityPolicy.RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT,
-            durability=QoSDurabilityPolicy.RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL,
-            history=QoSHistoryPolicy.RMW_QOS_POLICY_HISTORY_KEEP_LAST,
-            depth=1
+        rospy.init_node("minimal_publisher")
+
+        self.vehicle_local_position = np.array([0.0, 0.0, 0.0])
+        self.vehicle_attitude = np.array([1.0, 0.0, 0.0, 0.0])
+        self.vehicle_local_velocity = np.array([0.0, 0.0, 0.0])
+        self.setpoint_position = np.array([0.0, 0.0, 3.0])
+
+        self.status_sub = rospy.Subscriber(
+            "/mavros/state", State, self.vehicle_status_callback
         )
 
-        self.status_sub = self.create_subscription(
-            VehicleStatus,
-            '/fmu/out/vehicle_status',
-            self.vehicle_status_callback,
-            qos_profile)
+        self.local_twist_sub = rospy.Subscriber(
+            "/mavros/local_position/velocity_local",
+            TwistStamped,
+            self.vehicle_local_twist_callback,
+        )
 
-        self.attitude_sub = self.create_subscription(
-            VehicleAttitude,
-            '/fmu/out/vehicle_attitude',
-            self.vehicle_attitude_callback,
-            qos_profile)
-        self.local_position_sub = self.create_subscription(
-            VehicleLocalPosition,
-            '/fmu/out/vehicle_local_position',
+        self.local_position_sub = rospy.Subscriber(
+            "/mavros/local_position/pose",
+            PoseStamped,
             self.vehicle_local_position_callback,
-            qos_profile)
-
-        self.set_pose_srv = self.create_service(SetPose, '/set_pose', self.add_set_pos_callback)
-
-        self.publisher_offboard_mode = self.create_publisher(OffboardControlMode, '/fmu/in/offboard_control_mode', qos_profile)
-        self.publisher_rates_setpoint = self.create_publisher(VehicleRatesSetpoint, '/fmu/in/vehicle_rates_setpoint', qos_profile)
-        self.predicted_path_pub = self.create_publisher(Path, '/px4_mpc/predicted_path', 10)
-        self.reference_pub = self.create_publisher(Marker, "/px4_mpc/reference", 10
         )
 
-        timer_period = 0.02  # seconds
-        self.timer = self.create_timer(timer_period, self.cmdloop_callback)
+        # self.set_pose_srv = self.create_service(SetPose, '/set_pose', self.add_set_pos_callback)
 
-        self.nav_state = VehicleStatus.NAVIGATION_STATE_MAX
+        # self.publisher_offboard_mode = rospy.Publisher(OffboardControlMode, '/fmu/in/offboard_control_mode', qos_profile)
+        self.publisher_rates_setpoint = rospy.Publisher(
+            "/mavros/setpoint_raw/attitude", AttitudeTarget, queue_size=1
+        )
+        self.predicted_path_pub = rospy.Publisher(
+            "/px4_mpc/predicted_path", Path, queue_size=10
+        )
+        self.reference_pub = rospy.Publisher(
+            "/px4_mpc/reference", Marker, queue_size=10
+        )
+
+        self.nav_state = State.MODE_PX4_READY
 
         # Create Quadrotor and controller objects
         self.model = MultirotorRateModel()
@@ -119,38 +118,29 @@ class QuadrotorMPC(Node):
 
         # Spawn Controller
         self.mpc = MultirotorRateMPC(self.model)
-        # self.ctl = SetpointMPC(model=self.quad,
-        #                 dynamics=self.quad.model,
-        #                 param='P1',
-        #                 N=MPC_HORIZON,
-        #                 ulb=ulb, uub=uub, xlb=xlb, xub=xub)
 
-        self.vehicle_attitude = np.array([1.0, 0.0, 0.0, 0.0])
-        self.vehicle_local_position = np.array([0.0, 0.0, 0.0])
-        self.vehicle_local_velocity = np.array([0.0, 0.0, 0.0])
-        self.setpoint_position = np.array([0.0, 0.0, 3.0])
+        timer_period = 0.02  # seconds
+        self.timer = rospy.Timer(rospy.Duration(timer_period), self.cmdloop_callback)
 
-    def vehicle_attitude_callback(self, msg):
-        # TODO: handle NED->ENU transformation 
-        self.vehicle_attitude[0] = msg.q[0]
-        self.vehicle_attitude[1] = msg.q[1]
-        self.vehicle_attitude[2] = -msg.q[2]
-        self.vehicle_attitude[3] = -msg.q[3]
+    def vehicle_local_twist_callback(self, msg):
+        self.vehicle_local_velocity[0] = msg.twist.linear.x
+        self.vehicle_local_velocity[1] = msg.twist.linear.y
+        self.vehicle_local_velocity[2] = msg.twist.linear.z
 
     def vehicle_local_position_callback(self, msg):
-        # TODO: handle NED->ENU transformation 
-        self.vehicle_local_position[0] = msg.x
-        self.vehicle_local_position[1] = -msg.y
-        self.vehicle_local_position[2] = -msg.z
-        self.vehicle_local_velocity[0] = msg.vx
-        self.vehicle_local_velocity[1] = -msg.vy
-        self.vehicle_local_velocity[2] = -msg.vz
+        self.vehicle_local_position[0] = msg.pose.position.x
+        self.vehicle_local_position[1] = msg.pose.position.y
+        self.vehicle_local_position[2] = msg.pose.position.z
+
+        # # TODO: handle NED->ENU transformation
+        self.vehicle_attitude[0] = msg.pose.orientation.w
+        self.vehicle_attitude[1] = msg.pose.orientation.x
+        self.vehicle_attitude[2] = msg.pose.orientation.y
+        self.vehicle_attitude[3] = msg.pose.orientation.z
 
     def vehicle_status_callback(self, msg):
-        # print("NAV_STATUS: ", msg.nav_state)
-        # print("  - offboard status: ", VehicleStatus.NAVIGATION_STATE_OFFBOARD)
-        self.nav_state = msg.nav_state
-    
+        self.nav_state = msg.mode
+
     def publish_reference(self, pub, reference):
         msg = Marker()
         msg.action = Marker.ADD
@@ -176,22 +166,33 @@ class QuadrotorMPC(Node):
 
         pub.publish(msg)
 
-    def cmdloop_callback(self):
+    def cmdloop_callback(self, timer):
         # Publish offboard control modes
-        offboard_msg = OffboardControlMode()
-        offboard_msg.timestamp = int(Clock().now().nanoseconds / 1000)
-        offboard_msg.position=False
-        offboard_msg.velocity=False
-        offboard_msg.acceleration=False
-        offboard_msg.attitude = False
-        offboard_msg.body_rate = True
-        self.publisher_offboard_mode.publish(offboard_msg)
+        # offboard_msg = OffboardControlMode()
+        # offboard_msg.timestamp = int(Clock().now().nanoseconds / 1000)
+        # offboard_msg.position = False
+        # offboard_msg.velocity = False
+        # offboard_msg.acceleration = False
+        # offboard_msg.attitude = False
+        # offboard_msg.body_rate = True
+        # self.publisher_offboard_mode.publish(offboard_msg)
 
         error_position = self.vehicle_local_position - self.setpoint_position
 
-        x0 = np.array([error_position[0], error_position[1], error_position[2],
-         self.vehicle_local_velocity[0], self.vehicle_local_velocity[1], self.vehicle_local_velocity[2], 
-         self.vehicle_attitude[0], self.vehicle_attitude[1], self.vehicle_attitude[2], self.vehicle_attitude[3]]).reshape(10, 1)
+        x0 = np.array(
+            [
+                error_position[0],
+                error_position[1],
+                error_position[2],
+                self.vehicle_local_velocity[0],
+                self.vehicle_local_velocity[1],
+                self.vehicle_local_velocity[2],
+                self.vehicle_attitude[0],
+                self.vehicle_attitude[1],
+                self.vehicle_attitude[2],
+                self.vehicle_attitude[3],
+            ]
+        ).reshape(10, 1)
 
         u_pred, x_pred = self.mpc.solve(x0)
 
@@ -199,8 +200,12 @@ class QuadrotorMPC(Node):
         predicted_path_msg = Path()
         for predicted_state in x_pred:
             idx = idx + 1
-                # Publish time history of the vehicle path
-            predicted_pose_msg = vector2PoseMsg('map', predicted_state[0:3] + self.setpoint_position, np.array([1.0, 0.0, 0.0, 0.0]))
+            # Publish time history of the vehicle path
+            predicted_pose_msg = vector2PoseMsg(
+                "map",
+                predicted_state[0:3] + self.setpoint_position,
+                np.array([1.0, 0.0, 0.0, 0.0]),
+            )
             predicted_path_msg.header = predicted_pose_msg.header
             predicted_path_msg.poses.append(predicted_pose_msg)
         self.predicted_path_pub.publish(predicted_path_msg)
@@ -208,17 +213,16 @@ class QuadrotorMPC(Node):
 
         thrust_rates = u_pred[0, :]
         # Hover thrust = 0.73
-        thrust_command = -(thrust_rates[0] * 0.07 + 0.0)
-        if self.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
-            setpoint_msg = VehicleRatesSetpoint()
-            setpoint_msg.timestamp = int(Clock().now().nanoseconds / 1000)
-            setpoint_msg.roll = float(thrust_rates[1])
-            setpoint_msg.pitch = float(-thrust_rates[2])
-            setpoint_msg.yaw = float(-thrust_rates[3])
-            setpoint_msg.thrust_body[0] = 0.0
-            setpoint_msg.thrust_body[1] = 0.0
-            setpoint_msg.thrust_body[2] = float(thrust_command)
-            self.publisher_rates_setpoint.publish(setpoint_msg)
+        thrust_command = (thrust_rates[0] * 0.07 + 0.0)
+        # if self.nav_state == State.MODE_PX4_OFFBOARD:
+        setpoint_msg = AttitudeTarget()
+        setpoint_msg.header.stamp = rospy.Time.now()
+        setpoint_msg.type_mask = AttitudeTarget.IGNORE_ATTITUDE
+        setpoint_msg.body_rate.x = float(thrust_rates[1])
+        setpoint_msg.body_rate.y = float(thrust_rates[2])
+        setpoint_msg.body_rate.z = float(thrust_rates[3])
+        setpoint_msg.thrust = float(thrust_command)
+        self.publisher_rates_setpoint.publish(setpoint_msg)
 
     def add_set_pos_callback(self, request, response):
         self.setpoint_position[0] = request.pose.position.x
@@ -227,16 +231,11 @@ class QuadrotorMPC(Node):
 
         return response
 
+
 def main(args=None):
-    rclpy.init(args=args)
-
     quadrotor_mpc = QuadrotorMPC()
-
-    rclpy.spin(quadrotor_mpc)
-
-    quadrotor_mpc.destroy_node()
-    rclpy.shutdown()
+    rospy.spin()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
