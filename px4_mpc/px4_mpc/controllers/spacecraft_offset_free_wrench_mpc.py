@@ -39,6 +39,9 @@ import numpy as np
 class SpacecraftOffsetFreeWrenchMPC():
     """
     Offset Free MPC implmentation for a freeflyer robot.
+
+    This implementation is based on the OpenMPC library.
+    OpenMPC will become publicly available in the near future.
     """
     def __init__(self, model=None):
         if model is not None:
