@@ -68,9 +68,9 @@ class SpacecraftRateMPC():
         ocp.solver_options.N_horizon = N_horizon
 
         # set cost
-        Q_mat = np.diag([5e0, 5e0, 5e0, 8e-1, 8e-1, 8e-1, 8e3])
-        Q_e = 10 * Q_mat
-        R_mat = 2*np.diag([1e-3, 1e-3, 1e-3, 2e0, 2e0, 2e0])
+        Q_mat = np.diag([80, 80, 80, 50, 50, 50, 800])
+        Q_e = 20 * Q_mat
+        R_mat = np.diag([10, 10, 10, 10, 10, 10])
 
         # References:
         x_ref = cs.MX.sym('x_ref', (10, 1))

@@ -41,7 +41,7 @@ class SpacecraftWrenchModel():
 
         # constants
         self.mass = 16.8
-        self.inertia = np.diag((0.1454, 0.1366, 0.1594))
+        self.inertia = np.diag((0.1454, 0.1366, 0.297))
         self.max_thrust = 1.5
         self.max_torque = 0.5
 

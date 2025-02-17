@@ -53,6 +53,7 @@ class SpacecraftOffsetFreeWrenchMPC():
         self.states = self.model.x
         self.inputs = self.model.u
         self.disturbances = self.model.d
+        print("D: ", self.disturbances.shape)
 
         self.system = NonlinearSystem(updfcn=self.rhs,
                                       states=self.states,
@@ -72,7 +73,7 @@ class SpacecraftOffsetFreeWrenchMPC():
         self.umin = -self.umax
 
         # Setup LQR and Tracking MPC
-        dnom = np.array([0.00, 0.00, 0.0])
+        dnom = np.array([0.00, 0.00, 0.0, 0.0, 0.0, 0.0])
         yref = np.array([0.0, 0.0, 0, 0, 0, 0, 0, 0, 0.0, 0, 0, 0])
         (xref, uref) = self.prediction_model.get_target_point(yref, dnom)
         L, P, _ = self.prediction_model.compute_lqr_controller(self.Q, self.R, (xref, uref, dnom))
@@ -95,6 +96,9 @@ class SpacecraftOffsetFreeWrenchMPC():
         # Initialize the MPC controller
         self.mpc = trackingMPC(mpcProblemData)
 
+        # Initialize disturbance to nominal value
+        self.d_hat = np.zeros((6,))
+
         # Done with setup
         print("SpacecraftOffsetFreeWrenchMPC initialized.")
 
@@ -105,14 +109,14 @@ class SpacecraftOffsetFreeWrenchMPC():
         # Setup EKF
         estimatorModel = create_estimator_model(self.prediction_model)
         # Define the initial state and covariance estimates
-        P0 = 1000 * np.eye(15)  # Initial state covariance
+        P0 = 1000 * np.eye(18)  # Initial state covariance
 
         # Define the process noise and measurement noise covariance matrices
-        Qnoise = np.diag([0.001] * 15)  # Process noise covariance
+        Qnoise = np.diag([0.001] * 18)  # Process noise covariance
         Rnoise = np.diag([0.01] * 12)  # Measurement noise covariance
 
         # Update xhat with disturbance model
-        x0_hat = np.concatenate((x0_hat, np.zeros((3,))), axis=0)
+        x0_hat = np.concatenate((x0_hat, np.zeros((6,))), axis=0)
 
         # Pack the EKF parameters into a struct
         ekfParameters = {
@@ -124,6 +128,16 @@ class SpacecraftOffsetFreeWrenchMPC():
             'dt': self.dt  # Time step
         }
         self.ekf = EKF(ekfParameters)
+
+    def get_disturbance_estimate(self):
+        """
+        Get disturbance estimate.
+
+        :return: disturbance estimate
+        :rtype: np.ndarray
+        """
+        d_hat = self.ekf.get_state()[12:]
+        return d_hat.flatten()
 
     def remove_quat_scalar(self, x0):
         """
@@ -194,6 +208,7 @@ class SpacecraftOffsetFreeWrenchMPC():
 
         # Solve MPC:
         x_hat = self.ekf.get_state()
+
         uPred, xPred = self.mpc.compute_predicted_optimal_controls(x_hat[0:self.n], yref, x_hat[self.n:])
         u_current = uPred[:, 0]
 

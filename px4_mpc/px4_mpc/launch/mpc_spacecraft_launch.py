@@ -48,7 +48,7 @@ def generate_launch_description():
     # Declare launch arguments
     mode_arg = DeclareLaunchArgument(
         'mode',
-        default_value='offset_free_wrench',
+        default_value='rate',
         description='Mode of the controller (rate, wrench, direct_allocation)'
     )
 
@@ -67,6 +67,7 @@ def generate_launch_description():
     mode = LaunchConfiguration('mode')
     namespace = LaunchConfiguration('namespace')
     setpoint_from_rviz = LaunchConfiguration('setpoint_from_rviz')
+    sitl = LaunchConfiguration('sitl', default='true')
 
     return LaunchDescription([
         mode_arg,
@@ -82,7 +83,8 @@ def generate_launch_description():
             parameters=[
                 {'mode': mode},
                 {'namespace': namespace},
-                {'setpoint_from_rviz': setpoint_from_rviz}
+                {'setpoint_from_rviz': setpoint_from_rviz},
+                {'sitl': sitl}
             ]
         ),
         Node(
@@ -105,7 +107,8 @@ def generate_launch_description():
             output='screen',
             emulate_tty=True,
             parameters=[
-                {'namespace': namespace}
+                {'namespace': namespace},
+                {'sitl': sitl}
             ],
             condition=UnlessCondition(LaunchConfiguration('setpoint_from_rviz'))
         ),
