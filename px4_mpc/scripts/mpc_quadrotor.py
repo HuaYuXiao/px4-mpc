@@ -59,10 +59,23 @@ def vector2PoseMsg(frame_id, position, attitude):
     pose_msg.pose.position.x = float(position[0])
     pose_msg.pose.position.y = float(position[1])
     pose_msg.pose.position.z = float(position[2])
+
     return pose_msg
 
 class QuadrotorMPC(object):
     def __init__(self):
+        self.nav_state = VehicleStatus.NAVIGATION_STATE_MAX
+        
+        # Instantiate model and controller
+        self.model = MultirotorRateModel()
+        MPC_HORIZON = 15
+        self.mpc = MultirotorRateMPC(self.model)
+        
+        self.vehicle_attitude = np.array([1.0, 0.0, 0.0, 0.0])
+        self.vehicle_local_position = np.array([0.0, 0.0, 0.0])
+        self.vehicle_local_velocity = np.array([0.0, 0.0, 0.0])
+        self.setpoint_position = np.array([0.0, 0.0, 3.0])
+            
         # Subscribers
         self.status_sub = rospy.Subscriber('/fmu/out/vehicle_status', VehicleStatus, self.vehicle_status_callback)
         self.attitude_sub = rospy.Subscriber('/fmu/out/vehicle_attitude', VehicleAttitude, self.vehicle_attitude_callback)
@@ -77,21 +90,9 @@ class QuadrotorMPC(object):
         self.predicted_path_pub = rospy.Publisher('/px4_mpc/predicted_path', Path, queue_size=10)
         self.reference_pub = rospy.Publisher('/px4_mpc/reference', Marker, queue_size=10)
         
-        # Timer (ROS1 uses rospy.Timer)
+        # Timer
         self.timer = rospy.Timer(rospy.Duration(0.02), self.cmdloop_callback)
         
-        self.nav_state = VehicleStatus.NAVIGATION_STATE_MAX
-        
-        # Instantiate model and controller
-        self.model = MultirotorRateModel()
-        MPC_HORIZON = 15
-        self.mpc = MultirotorRateMPC(self.model)
-        
-        self.vehicle_attitude = np.array([1.0, 0.0, 0.0, 0.0])
-        self.vehicle_local_position = np.array([0.0, 0.0, 0.0])
-        self.vehicle_local_velocity = np.array([0.0, 0.0, 0.0])
-        self.setpoint_position = np.array([0.0, 0.0, 3.0])
-    
     def vehicle_attitude_callback(self, msg):
         # TODO: handle NED->ENU transformation if needed
         self.vehicle_attitude[0] = msg.q[0]
@@ -181,6 +182,7 @@ class QuadrotorMPC(object):
         self.setpoint_position[0] = req.pose.position.x
         self.setpoint_position[1] = req.pose.position.y
         self.setpoint_position[2] = req.pose.position.z
+        
         return SetPoseResponse()
 
 def main():
