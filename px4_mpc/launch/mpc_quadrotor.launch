@@ -1,0 +1,10 @@
+<launch>
+  <!-- Launch the mpc_quadrotor node from the px4_mpc package -->
+  <node pkg="px4_mpc" type="mpc_quadrotor.py" name="mpc_quadrotor" ns="px4_mpc" output="screen" />
+
+  <!-- Launch the rviz_pos_marker node from the px4_mpc package -->
+  <!-- <node pkg="px4_mpc" type="rviz_pos_marker.py" name="rviz_pos_marker" ns="px4_mpc" output="screen" /> -->
+
+  <!-- Launch RViz, loading the specified configuration file -->
+  <node pkg="rviz" type="rviz" name="rviz" args="-d $(find px4_mpc)/config/config.rviz" output="screen" />
+</launch>
